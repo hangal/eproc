@@ -3,6 +3,9 @@ package org.hack4hd.eproc;
 import org.apache.commons.cli.*;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.openqa.selenium.By;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -16,6 +19,8 @@ import java.util.List;
  * Created by hangal on 12/11/16.
  */
 public class EprocFetcher {
+    private static Log log = LogFactory.getLog(Tender.class);
+
     StepDefs browser;
 
     private static Options getOpt()
@@ -41,11 +46,35 @@ public class EprocFetcher {
         // use xpath syntax: https://github.com/seleniumhq/selenium-google-code-issue-archive/issues/739
         browser.dropDownSelectionByXpath("//select[contains(@id, 'eprocTenders:departmentId')]", "Hubli-Dharwad BRTS Company Ltd");
       //  browser.dropDownSelectionByXpath("//input[contains(@id, 'eprocTenders:tenderCreateDateFrom')]", "01/01/2011");
-        browser.enterValueInInputField("eprocTenders:tenderCreateDateFrom", "01/01/2011");
-        browser.enterValueInInputField("eprocTenders:tenderCreateDateTo", "31/12/2016");
+      //  browser.enterValueInInputField("eprocTenders:tenderCreateDateFrom", "01/01/2011");
+      //  browser.enterValueInInputField("eprocTenders:tenderCreateDateTo", "31/12/2016");
 
     //    browser.dropDownSelectionByXpath("//input[contains(@id, 'eprocTenders:tenderCreateDateTo')]", "31/12/2016");
         browser.dropDownSelectionByXpath("//select[contains(@id, 'eprocTenders:status')]", "Published"); // options: Closed, Under Evaluation, Evaluation Completed, Awarded, Evaluation suspended, No Bids Received, Recalled, Retendered, Finalized
+    }
+
+    // walks through all the pages
+    private List<Tender> getAllTenders(String dir, String tenderStatus) throws IOException, InterruptedException {
+        List<Tender> allTenders = new ArrayList<>();
+
+        int nextPage = 2;
+        while (true) {
+            // get all tenders on current page
+            List<Tender> tendersOnPage = browser.getTendersOnPage(dir, tenderStatus);
+            allTenders.addAll(tendersOnPage);
+
+            // try and click through to the next page
+            String xpath = "//table[@class = 'scroller']//a[text() = '" + nextPage + "']";
+            try {
+                browser.clickOnXpath(xpath);
+            } catch (Exception e) {
+                log.warn("OK, no next page #" + nextPage);
+                break;
+            }
+            nextPage++;
+        }
+
+        return allTenders;
     }
 
     public void doIt(String[] args) throws ParseException, InterruptedException, IOException {
@@ -60,7 +89,7 @@ public class EprocFetcher {
 //        setupDropDownsHDMC();
         setupDropDownsBRTS();
 
-        String[] tenderStatuses = new String[]{"Published", "Under Evaluation", "Evaluation Completed", "Awarded"};
+        String[] tenderStatuses = new String[]{"Evaluation Completed"}; // "Published", "Under Evaluation", , "Awarded"};
 
         List<Tender> allTenders = new ArrayList<>();
 
@@ -71,8 +100,7 @@ public class EprocFetcher {
                 // link for view notice inviting tender details
                 browser.dropDownSelectionByXpath("//select[contains(@id, 'eprocTenders:status')]", tenderStatus);
                 browser.clickOnXpath("//input[contains(@id, 'eprocTenders:butSearch')]");
-                List<Tender> tendersOnPage = browser.getTendersOnPage("brts-data", tenderStatus);
-                allTenders.addAll(tendersOnPage);
+                allTenders.addAll (getAllTenders("brts-data", tenderStatus));
             }
         } catch (Exception e) {
             browser.updateTestStatus("Sorry, download failed! " + e);

@@ -18,7 +18,7 @@ import java.util.Map;
  * Created by hangal on 12/12/16.
  */
 public class Tender implements Serializable {
-    private static Log log = LogFactory.getLog(StepDefs.class);
+    private static Log log = LogFactory.getLog(Tender.class);
     public static SimpleDateFormat sdf = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
 
     String currentStatus;

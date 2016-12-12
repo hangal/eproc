@@ -358,8 +358,8 @@ public class StepDefs {
     void updateTestStatus(String status) {
         testStatus = status;
         String script = "var e123 = document.getElementById('test-status'); if (e123 != null) { e123.remove(); }";
-        script +=  "document.body.innerHTML += '<div id=\"test-status\" style=\"font-family:sans-serif,serif;position:fixed;bottom:0px; width:100%; text-align:center; font-size:18px; background-color:" + testStatusColor + ";color:white;border-top: solid 2px black; padding: 5px;\">Test status: " + testStatus + "</div>';";
-        try { ((JavascriptExecutor) driver).executeScript(script); } catch (Exception e) { }
+      //  script +=  "document.body.innerHTML += '<div id=\"test-status\" style=\"font-family:sans-serif,serif;position:fixed;bottom:0px; width:100%; text-align:center; font-size:18px; background-color:" + testStatusColor + ";color:white;border-top: solid 2px black; padding: 5px;\">Test status: " + testStatus + "</div>';";
+     //   try { ((JavascriptExecutor) driver).executeScript(script); } catch (Exception e) { }
     }
 
     // @Then("^I wait for the page (.*?) to be displayed within (\\d+) seconds$")
