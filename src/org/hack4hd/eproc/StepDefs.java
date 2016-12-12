@@ -1,5 +1,9 @@
 package org.hack4hd.eproc;
 
+import com.google.common.collect.LinkedHashMultiset;
+import com.google.common.collect.Multiset;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -15,8 +19,15 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.Select;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.io.*;
 import java.net.MalformedURLException;
+import java.net.URL;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -26,33 +37,48 @@ public class StepDefs {
     public static String BASE_DIR;
     private static String BROWSER_NAME;
 
-    private static String DEFAULT_BASE_DIR = System.getProperty ("user.home") + File.separator + "epadd-test";
-	private static Log log = LogFactory.getLog(StepDefs.class);
-	static Properties VARS;
-    private static String EPADD_TEST_PROPS_FILE = System.getProperty("user.home") + File.separator + "epadd.test.properties";
+    private static String DEFAULT_BASE_DIR = System.getProperty("user.home") + File.separator + "eproc-test";
+    private static Log log = LogFactory.getLog(StepDefs.class);
+    static Properties VARS;
+    private static String EPROC_TEST_PROPS_FILE = System.getProperty("user.home") + File.separator + "eproc.test.properties";
 
-    private String opsystem = System.getProperty("os.name");
-    private Process epaddProcess = null;
     private Stack<String> tabStack = new Stack<>();
-    public static String testStatus = "1...2...3", testStatusColor = "rgba(10,140,10,0.8)";
-	private String screenshotsDir;
+    public static String testStatus = "Testing....", testStatusColor = "rgba(10,140,10,0.8)";
+    private String screenshotsDir;
+
+    // Create a trust manager that does not validate certificate chains
+    // because the eproc certs cause the download for the https URL on the subpages docs to fail otherwise
+    static TrustManager[] trustAllCerts;
+    static {
+        try {
+            // Install the all-trusting trust manager
+            trustAllCerts    = new TrustManager[]{new X509TrustManager() {
+                public X509Certificate[] getAcceptedIssuers() { return null;}
+                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+            }};
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, trustAllCerts, new SecureRandom());
+            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+        } catch(Exception e) { }
+    }
 
     public boolean runningOnMac() { return System.getProperty("os.name").startsWith("Mac"); }
 
     public StepDefs() {
 		VARS = new Properties();
 
-		File f = new File(EPADD_TEST_PROPS_FILE);
+		File f = new File(EPROC_TEST_PROPS_FILE);
 		if (f.exists() && f.canRead()) {
-			log.info("Reading configuration from: " + EPADD_TEST_PROPS_FILE);
+			log.info("Reading configuration from: " + EPROC_TEST_PROPS_FILE);
 			try {
-				InputStream is = new FileInputStream(EPADD_TEST_PROPS_FILE);
+				InputStream is = new FileInputStream(EPROC_TEST_PROPS_FILE);
 				VARS.load(is);
 			} catch (Exception e) {
-				print_exception("Error reading epadd properties file " + EPADD_TEST_PROPS_FILE, e, log);
+				print_exception("Error reading epadd properties file " + EPROC_TEST_PROPS_FILE, e, log);
 			}
 		} else {
-			log.warn("ePADD properties file " + EPADD_TEST_PROPS_FILE + " does not exist or is not readable");
+			log.warn("ePADD properties file " + EPROC_TEST_PROPS_FILE + " does not exist or is not readable");
 		}
 
         for (String key: VARS.stringPropertyNames()) {
@@ -96,13 +122,13 @@ public class StepDefs {
 	}
 
 	// @Given("^I wait for (\\d+) sec$")
-	public void waitFor(int time) throws InterruptedException {
-		TimeUnit.SECONDS.sleep(time);
+	public void waitFor(int time) {
+        try { TimeUnit.SECONDS.sleep(time); }
+        catch (Exception e) { }
 	}
 
 	// @Given("^I enter (.*) into input field with name \"(.*?)\"$")
-	public void enterValueInInputField( String fieldName, String inputValue) throws InterruptedException {
-		inputValue = resolveValue(inputValue);
+	public void enterValueInInputField(String fieldName, String inputValue) throws InterruptedException {
 		try {
 			WebElement inputField = driver.findElement(By.name(fieldName));
 			inputField.sendKeys(inputValue);
@@ -116,42 +142,8 @@ public class StepDefs {
 		driver.navigate().back();
 	}
 
-	// @Then("I close ePADD$")
-	public void closeEpadd() throws IOException, InterruptedException {
-        updateTestStatus("Closing ePADD");
-		if (epaddProcess == null)
-			return;
-		epaddProcess.destroy();
-	}
-
-	// @Given("I open ePADD$")
-	public void openEpadd(String mode) throws IOException, InterruptedException {
-		// we'll always launch using epadd-standalone.jar
-        updateTestStatus("Starting ePADD");
-
-		String errFile = System.getProperty("java.io.tmpdir") + File.separator + "epadd-test.err.txt";
-		String outFile = System.getProperty("java.io.tmpdir") + File.separator + "epadd-test.out.txt";
-        String cmd = VARS.getProperty ("cmd");
-        if (cmd == null) {
-            log.warn ("Please confirm cmd in " + EPADD_TEST_PROPS_FILE);
-            throw new RuntimeException ("no command to start epadd");
-        }
-
-        cmd = "java -Depadd.mode=" + mode +  " -Depadd.base.dir=" + BASE_DIR + " " + cmd;
-        cmd = cmd + " --no-browser-open"; // we'll open our own browser
-        ProcessBuilder pb = new ProcessBuilder(cmd.split(" "));
-
-//		ProcessBuilder pb = new ProcessBuilder("java", "-Xmx2g", "-jar", "epadd-standalone.jar", "--no-browser-open");
-		pb.redirectError(new File(errFile));
-		pb.redirectOutput(new File(outFile));
-		log.info ("Sending epadd output to: " + outFile);
-		epaddProcess = pb.start();
-		log.info ("Started ePADD");
-	}
-
 	// @Then("CSS element \"(.*)\" should have value (.*)$")
 	public void verifyEquals(String selector, String expectedValue) {
-		expectedValue = resolveValue(expectedValue);
 		String actualText = driver.findElement(By.cssSelector(selector)).getText();
 	    
 		if (!actualText.equals(expectedValue)) {
@@ -164,27 +156,11 @@ public class StepDefs {
 
 	// @Then("CSS element \"([^\"]*)\" should contain (.*)$")
 	public void verifyContains(String selector, String expectedValue) {
-		expectedValue = resolveValue(expectedValue);
 		String actualText = driver.findElement(By.cssSelector(selector)).getText();
 		actualText = actualText.toLowerCase();
 		expectedValue = expectedValue.toLowerCase();
 		if (!actualText.contains(expectedValue)) {
 			log.warn ("ACTUAL text for CSS selector " + selector + ": " + actualText + " EXPECTED TO CONTAIN: " + expectedValue);
-			throw new RuntimeException();
-		}
-		log.info ("Found expected text for CSS selector " + selector + ": " + actualText);
-	}
-
-
-	// @Then("CSS element \"([^\"]*)\" should start with a number > 0")
-	public void verifyStartsWithNumberGT0(String selector) {
-		String actualText = driver.findElement(By.cssSelector(selector)).getText();
-		actualText = actualText.trim();
-		char ch = actualText.charAt(0);
-		if (Character.isDigit(ch) && ch > '0') { // the number can't start with 0
-			// its ok
-		} else {
-			log.warn ("ACTUAL text " + actualText + " was expected to start with a number > 0");
 			throw new RuntimeException();
 		}
 		log.info ("Found expected text for CSS selector " + selector + ": " + actualText);
@@ -318,7 +294,6 @@ public class StepDefs {
         // testStatus = "Clicking on" + ((elementType != null) ? elementType + " " : "") + linkText;
 
 		elementType = elementType.trim(); // required because linkText might come as "button " due to regex matching above
-		linkText = resolveValue(linkText);
 		linkText = linkText.toLowerCase();
 		WebElement e = null;
 
@@ -389,7 +364,6 @@ public class StepDefs {
 
     // @Then("^I wait for the page (.*?) to be displayed within (\\d+) seconds$")
 	public void waitForPageToLoad(String url, int time) {
-		url = resolveValue(url);
 		long startMillis = System.currentTimeMillis();
 		WebDriverWait wait = new WebDriverWait(driver, time);
 		try {
@@ -405,8 +379,7 @@ public class StepDefs {
 	// waits for button containing the given buttonText to appear within time seconds
 	// @Then("^I wait for button (.*?) to be displayed within (\\d+) seconds$")
 	public void waitForButton(String buttonText, int time) {
-		buttonText = resolveValue(buttonText);
-		
+
 		long startMillis = System.currentTimeMillis();
 		WebDriverWait wait = new WebDriverWait(driver, time);
 		try {
@@ -429,68 +402,6 @@ public class StepDefs {
 		int n = -1;
 		try { n = Integer.parseInt(totalNumberOfEmails); } catch (Exception e) { }
 		return n;
-	}
-
-	// @Then("^I check for ([<>]*) *(\\d+) messages on the page$")
-	public void checkMessagesOnBrowsePage(String relation, int nExpectedMessages) {
-		relation = relation.trim();
-		int nActualMessages = nMessagesOnBrowsePage();
-		log.info ("checking for " + relation + " " + nExpectedMessages + " messages, got " + nActualMessages);
-		if ("".equals(relation) && !(nActualMessages == nExpectedMessages))
-			throw new RuntimeException("Expected " + nExpectedMessages + " found " + nActualMessages);
-		if (">".equals(relation) && !(nActualMessages > nExpectedMessages))
-			throw new RuntimeException("Expected >" + nExpectedMessages + " found " + nActualMessages);
-		if ("<".equals(relation) && !(nActualMessages < nExpectedMessages))
-			throw new RuntimeException("Expected <" + nExpectedMessages + " found " + nActualMessages);
-	}
-
-	// @Then("I check for ([<>]*) *(\\d+) highlights on the page")
-	public void checkHighlights(String relation, int nExpectedHighlights) {
-		Collection<WebElement> highlights = driver.findElements(By.cssSelector(".muse-highlight"));
-		highlights.addAll(driver.findElements(By.cssSelector(".hilitedTerm"))); // could be either of these classes used for highlighting
-		int nHighlights = highlights.size();
-
-		log.info ("checking for " + relation + " " + nExpectedHighlights + " messages, got " + nHighlights);
-		if ("".equals(relation) && !(nHighlights == nExpectedHighlights))
-			throw new RuntimeException("Expected " + nExpectedHighlights + " found " + nHighlights);
-		if (">".equals(relation) && !(nHighlights > nExpectedHighlights))
-			throw new RuntimeException("Expected >" + nExpectedHighlights + " found " + nHighlights);
-		if ("<".equals(relation) && !(nHighlights < nExpectedHighlights))
-			throw new RuntimeException("Expected <" + nExpectedHighlights + " found " + nHighlights);
-	}
-
-	// @And("I check that \"(.*)\" is highlighted")
-	public void checkHighlighted(String termToBeHighighted) {
-		Collection<WebElement> highlights = driver.findElements(By.cssSelector(".muse-highlight"));
-		highlights.addAll(driver.findElements(By.cssSelector(".hilitedTerm"))); // could be either of these classes used for highlighting
-		for (WebElement e: highlights)
-			if (termToBeHighighted.equals(e.getText())) {
-				log.info ("highlighted term " + termToBeHighighted + " found");
-				return;
-			}
-		String message = "highlighted term " + termToBeHighighted + " not found!";
-		log.warn (message);
-		throw new RuntimeException(message);
-	}
-
-		// check for some messages in another tab, then close it
-	// @Then("some messages should be displayed in another tab$")
-	public void someMessagesShouldBeDisplayed() throws InterruptedException {
-		String parentWindow = driver.getWindowHandle();
-		Set<String> handles = driver.getWindowHandles();
-		for (String windowHandle : handles) {
-			if (!windowHandle.equals(parentWindow)) {
-				driver.switchTo().window(windowHandle);
-				int nMessages = nMessagesOnBrowsePage();
-				if (nMessages <= 0) {
-					throw new RuntimeException("Error: No messages on browse page");
-				} else {
-					log.info (nMessages + " messages on the browse page");
-				}
-				driver.close();
-			}
-		}
-		driver.switchTo().window(parentWindow);
 	}
 
 	// @Given("I switch to the \"(.*)\" tab$")
@@ -537,18 +448,6 @@ public class StepDefs {
 		switchToTab (lastWindow);
 	}
 
-	// @Given("I mark all messages \"Do not transfer\"")
-	public void markDNT() throws InterruptedException {
-		WebElement e = driver.findElement(By.id("doNotTransfer"));
-
-		if (!e.getAttribute("class").contains("flag-enabled")) {
-			driver.findElement(By.id("doNotTransfer")).click();
-			waitFor(1);
-		}
-
-		driver.findElement(By.id("applyToAll")).click();
-	}
-
 	// @Given("I set dropdown \"(.*?)\" to \"(.*?)\"$")
 	public void dropDownSelection(String cssSelector, String value) throws InterruptedException {
         WebElement element = driver.findElement(By.cssSelector(cssSelector));
@@ -565,102 +464,186 @@ public class StepDefs {
 		Select select = new Select(element);
 		waitFor (2);
 		select.selectByVisibleText(value);
+        waitFor (1);
 	}
 
-	public void getTendersOnPage() throws InterruptedException, IOException {
-        List<WebElement> rows = driver.findElements(By.xpath("//table[@id='eprocTenders:browserTableEprocTenders']//tr"));
-        int nRow = 0;
-        for (WebElement row: rows) {
-            List<WebElement> cols = row.findElements(By.tagName("td"));
-            if (cols.size() < 10)
-                continue;
+    // look for <td> elements whose text contains the fieldname and return the value of the next field
+	public String getValueOfNextField (String fieldName) {
+        try {
+            List<WebElement> titleElements = driver.findElements(By.xpath("//td[text()[contains(.,'" + fieldName + "')]]"));
+            if (titleElements == null)
+                return null;
+            // sanity check
+            if (titleElements.size() > 1)
+                log.warn ("More than 1 hit for title " + fieldName + " (got " + titleElements.size() + ")");
 
-            int nCol = 0;
-            String tenderId = "<NONE>", tenderDir = "NONE";
-            List<String> textCols = new ArrayList<>();
-            for (WebElement col: cols) {
-                String t = col.getText();
-                System.out.println ("col " + (++nCol) + ": " + t);
-                if (nCol == 3) {
-                    tenderId = t;
-                    tenderDir = tenderId;
-//                    tenderDir = tenderId.replaceAll("/", "@");
-                    tenderDir += File.separator;
-                    new File(tenderId).mkdirs();
+            // read the first element even if > 1 hit
+            if (titleElements.size() > 0) {
+                WebElement titleElement = titleElements.get(0);
+                if (titleElement != null) {
+                    WebElement nextElement = titleElement.findElement((By.xpath("following-sibling::*[1]")));
+                    if (nextElement == null) {
+                        log.warn ("Strange... no next element found for field " + fieldName);
+                    }
+                    return nextElement.getText();
                 }
-                textCols.add(t);
             }
+        } catch (Exception e) { }
+        return null;
+    }
 
-            WebElement lastCol = cols.get (cols.size()-1);
-            List<WebElement> subPages = lastCol.findElements(By.tagName("a"));
+	/** given top level cell, goes into each subpage linked to from that cell and fetches the subpage, as well as any download links on it */
+	public void downloadSubPages (Tender tender, WebElement topLevelCell, String tenderDir) throws IOException {
+        List<WebElement> subPages = topLevelCell.findElements(By.tagName("a"));
 
-            int nLinks = 0;
-            for (WebElement subPage: subPages) {
-//                link.click();
-                String url = subPage.getAttribute("href");
+        int nLinks = 0;
+        Multiset<String> subPageLowerCaseTitlesSeen = LinkedHashMultiset.create(); // this will track all the names of subpages seen
+        // usually, the page titles are: View Notice Inviting Tender details, Download Tender Documents, View Addendum for this tender, View Corrigendum for this tender, View Selected Supplier/s for this Tender
+        // I believe multiple sub pages with the same title are possible, so we'll be extra careful, using subPageLowerCaseTitlesSeen
+        // note: The "/" in View Selected Supplier/s for this Tender will be replaced by "_"
 
-                // open in a new tab. but get info on that tab and then close it.
-                // max 2 tabs will be open at a time
+        FileNameManager subPageNameManager = new FileNameManager();
+        FileNameManager blobNameManager = new FileNameManager();
 
-                ((JavascriptExecutor) driver).executeScript("window.open('" + url + "','_blank');");
-                ArrayList<String> tabs = new ArrayList<> (driver.getWindowHandles());
-                String subPageTitle = ((RemoteWebElement) subPage).findElementByTagName("img").getAttribute("title");
+        nextSubPage:
+        for (WebElement subPage: subPages) {
+            String url = subPage.getAttribute("href");
 
-                // save the page
+            // open in a new tab. but get info on that tab and then close it.
+            // max 2 tabs will be open at a time
+
+            ((JavascriptExecutor) driver).executeScript("window.open('" + url + "','_blank');");
+            ArrayList<String> tabs = new ArrayList<>(driver.getWindowHandles());
+
+
+            // use the title attribute of the img element as the subpage title.
+            // however, massage it to avoid conflicts, get rid of "/" embedded in it, etc.
+            String subPageTitle = ((RemoteWebElement) subPage).findElementByTagName("img").getAttribute("title");
+            subPageTitle = subPageNameManager.registerAndDisambiguate(subPageTitle);
+
+            tender.addSubPage(subPageTitle);
+
+            // save the page to a file
+            {
                 driver.switchTo().window(tabs.get(1));
+                updateTestStatus();
                 String pageSource = driver.getPageSource();
                 String htmlFile = tenderDir + subPageTitle + ".html";
-                PrintWriter pw = new PrintWriter(new FileOutputStream(htmlFile)); pw.println (pageSource); pw.close();
+                PrintWriter pw = new PrintWriter(new FileOutputStream(htmlFile));
+                pw.println(pageSource);
+                pw.close();
+            }
 
-                boolean isDownloadDocsSubpage = subPageTitle.contains ("Download Tender Documents");
-                log.info ("Subpage #" + (++nLinks) + ":" + "Download subpage = " + isDownloadDocsSubpage + " " + url);
+            // on these subpages, there is a td.pageHeading that contains the title of the page
+            String subPageHeading = null;
+            try { subPageHeading = driver.findElement(By.cssSelector("td.pageHeading")).getText(); }
+            catch (Exception e) { }
 
-                // if download docs subpage, also print out the links for the docs
-                if (isDownloadDocsSubpage) {
-                    List<WebElement> downloadLinks = driver.findElements(By.xpath("//td/a"));
-                    for (WebElement downloadLink : downloadLinks) {
-                        String href = downloadLink.getAttribute("href");
-                        if (href != null && href.contains("?")) // only log links with ?s for url param. otherwise https://eproc.karnataka.gov.in/eprocurement/login.seam also shows up as a download link
-                            log.info("Download link: " + href);
+            if ("Tender details".equalsIgnoreCase (subPageHeading)) {
+                tender.hasTenderDetails = true;
+                tender.financialBidType = getValueOfNextField ("Type of Quotation");
+                tender.evaluationType = getValueOfNextField ("Tender Evaluation Type");
+                tender.department = getValueOfNextField ("Department");
+                tender.bidValidityPeriod = getValueOfNextField ("Bid Validity Period");
+                tender.noOfCalls = getValueOfNextField ("No Of Calls");
+                tender.denominationType = getValueOfNextField ("Denomination Type");
+            }
+
+            if ("Bid Evaluation Results".equals (subPageHeading)) {
+
+                tender.hasBidEvaluationResults = true;
+                tender.financialBidType = getValueOfNextField ("Financial Bid Type");
+                tender.selectedSupplier = getValueOfNextField ("Selected Supplier");
+                tender.selectedCompanyName = getValueOfNextField ("Company Name");
+                tender.bidAmountInFigures = getValueOfNextField ("Bid Amount ( Rs. In figures"); // darn spelling and caps!!!!
+                tender.bidAmountInWords = getValueOfNextField ("Bid Amount ( Rs. In words");
+            }
+
+            boolean downloadDocsOnSubPage = subPageTitle.contains("Download Tender Documents");
+            log.info("Subpage #" + (++nLinks) + ":" + "Download subpage = " + downloadDocsOnSubPage + " " + url);
+
+            // if download links on subpage, also fetch those, if they don't already exist
+
+            // example of what a downloadable file looks like link: https://eproc.karnataka.gov.in/eprocurement/secure/FileViewer?uuid=4980b5ec-5673-47a0-8e4e-6cdc0e65a4ae&workspace=departments&repositoryType=TERTIARY
+            List<WebElement> downloadLinks;
+            try { downloadLinks = driver.findElements(By.xpath("//td/a[contains(@href, 'FileViewer?uuid')]")); }
+            catch (Exception e) { continue nextSubPage; } // if no download links, just continue to the next page
+
+            // ok, we do have some download links, let's get them
+            for (WebElement downloadLink : downloadLinks) {
+                String href = downloadLink.getAttribute("href");
+
+                // the filename is in the text part of the link
+                String blobName = downloadLink.getText();
+                blobName = blobNameManager.registerAndDisambiguate(blobName);
+                log.info("Download link for file: " + blobName + " href: " + href);
+                File f = new File(tenderDir + File.separator + blobName);
+                tender.addBlob(blobName);
+                if (!f.exists()) {
+                    try {
+                        // download save, convert to text
+                        FileUtils.copyURLToFile (new URL(href), f);
+                        String text = Util.blobToText (f.getAbsolutePath());
+                        Util.writeStringToFile (text, f.getAbsolutePath() + ".txt");
+                    } catch (Exception e) {
+                        Util.print_exception("Error trying to extract text from " + f.getAbsolutePath(), e, log);
                     }
                 }
-
-                waitFor(1);
-                driver.close();
-                driver.switchTo().window(tabs.get(0)); // explicitly switching back to the original tab is important
+                else
+                    log.info ("Skipping file: " + f.getAbsolutePath() + " because it already exists");
             }
-            log.info ("Completed row # " + (++nRow) + " TenderID: " + tenderId + "\n\n---------\n\n");
+
+            // all done for this subpage
+            waitFor(1);
+            driver.close();
+            driver.switchTo().window(tabs.get(0)); // explicitly switching back to the original tab is important
         }
     }
 
-	// @Then("I verify the folder (.*) does not exist$")
-	public void checkFolderDoesNotExist(String folderName) throws InterruptedException, IOException {
-		folderName = resolveValue(folderName);
-		if (new File(folderName).exists()) {
-			throw new RuntimeException ("Folder " + folderName + " is not expected to exist, but it does!");
-		}
-		log.info ("Good, folder " + folderName + " does not exist");
-	}
+    /** downloads all tenders on page */
+	public List<Tender> getTendersOnPage(String rootDir, String status) throws InterruptedException, IOException {
+        if (Util.nullOrEmpty(rootDir))
+            rootDir = ".";
+        List<Tender> tenders = new ArrayList<>();
 
-	// @Then("I verify the folder (.*) exists$")
-	public void checkFolderExists(String folderName) throws InterruptedException, IOException {
-		folderName = resolveValue(folderName);
-		if (!new File(folderName).exists()) {
-			throw new RuntimeException ("Folder " + folderName + " is expected to exist, but it does not!");
-		}
-		log.info ("Good, folder " + folderName + " exists");
-	}
+        List<WebElement> rows = driver.findElements(By.xpath("//table[@id='eprocTenders:browserTableEprocTenders']/tbody/tr"));
+        int nRow = 0;
+        Tender tender = new Tender();
+        tender.currentStatus = status;
 
-	// if the value is <abc> then we read the value of property abc in the hook. otherwise we use it as is.
-	public String resolveValue(String s) {
-		if (s == null)
-			return null;
-		s = s.trim(); // strip spaces before and after
-		if (s.startsWith("<") && s.endsWith(">"))
-			s = VARS.getProperty(s.substring(1, s.length()-1));
-		if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) // strip quotes -- if "abc", simply make it abc
-			s = s.substring(1, s.length()-1);
-		return s;
-	}
+        for (WebElement row: rows) {
+            List<WebElement> cols = row.findElements(By.tagName("td"));
+            // normally cols will be of size 11
+            if (cols.size() < 11) {
+                log.warn ("unexpected #cols: " + cols.size() + row.getText());
+                continue;
+            }
+            tender.departmentOrLocationCode = cols.get(1).getText();
+            tender.number = cols.get(2).getText();
+            tender.title = cols.get(3).getText();
+            tender.type = cols.get(4).getText();
+            tender.category = cols.get(5).getText();
+            tender.subCategory = cols.get(6).getText();
+            tender.estimatedValue = cols.get(7).getText();
+            tender.NITPublishedDate = cols.get(8).getText();
+            tender.lastDateForBidSubmission = cols.get(9).getText();
 
+            String tenderId = tender.number;
+            String tenderDir = rootDir + File.separator + tenderId; // + "-" + status;
+            tenderDir += File.separator; // trailing sep to indicate its a directory
+            File tenderDirFile = new File(tenderDir);
+            if (!tenderDirFile.exists())
+                tenderDirFile.mkdirs();
+
+            log.info ("Downloading subpages...");
+            WebElement lastCol = cols.get (cols.size()-1);
+            downloadSubPages (tender, lastCol, tenderDir);
+
+            tenders.add (tender);
+            tender.save(tenderDir);
+
+            log.info ("Completed tender in row # " + (++nRow) + "/" + rows.size() + " TenderID: " + tenderId + "\n\n---------\n\n");
+        }
+        return tenders;
+    }
 }
