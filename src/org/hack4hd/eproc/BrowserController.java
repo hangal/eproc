@@ -530,12 +530,18 @@ public class BrowserController {
             // set the target to _blank to make it open in a new page and click on it
             ((JavascriptExecutor) driver).executeScript("arguments[0].setAttribute(arguments[1], arguments[2])", subPageLink, "target", "_blank");
             subPageLink.click();
-
+            waitFor (1);
             // now subpage should open in a new tab; switch to it
 
             ArrayList<String> tabs = new ArrayList<>(driver.getWindowHandles());
 
             // save the page to a file
+            if (tabs.size() <= 1) {
+                // saw only 1 tab once
+                log.warn("Only 1 tab open?? tender #= " + tender.number + " #subpage = " + i);
+                continue;
+            }
+
             {
                 driver.switchTo().window(tabs.get(1));
                 updateTestStatus();
@@ -583,28 +589,33 @@ public class BrowserController {
             try { downloadLinks = driver.findElements(By.xpath("//td/a[contains(@href, 'FileViewer?uuid')]")); }
             catch (Exception e) { continue nextSubPage; } // if no download links, just continue to the next page
 
-            // ok, we do have some download links, let's get them
-            for (WebElement downloadLink : downloadLinks) {
-                String href = downloadLink.getAttribute("href");
+            if (EprocFetcher.FETCH_ALL_BLOBS || EprocFetcher.FETCH_ONLY_TEXT_BLOBS) {
+                // ok, we do have some download links, let's get them
+                for (WebElement downloadLink : downloadLinks) {
+                    String href = downloadLink.getAttribute("href");
 
-                // the filename is in the text part of the link
-                String blobName = downloadLink.getText();
-                blobName = blobNameManager.registerAndDisambiguate(blobName);
-                log.info("Download link for file: " + blobName + " href: " + href);
-                File f = new File(tenderDir + File.separator + blobName);
-                tender.addBlob(blobName);
-                if (!f.exists()) {
-                    try {
-                        // download save, convert to text
-                        FileUtils.copyURLToFile (new URL(href), f);
-                        String text = Util.blobToText (f.getAbsolutePath());
-                        Util.writeStringToFile (text, f.getAbsolutePath() + ".txt");
-                    } catch (Exception e) {
-                        Util.print_exception("Error trying to extract text from " + f.getAbsolutePath(), e, log);
-                    }
+                    // the filename is in the text part of the link
+                    String blobName = downloadLink.getText();
+
+                    if (EprocFetcher.FETCH_ONLY_TEXT_BLOBS && !Util.isTextBlob(blobName))
+                        continue;
+
+                    blobName = blobNameManager.registerAndDisambiguate(blobName);
+                    log.info("Download link for file: " + blobName + " href: " + href);
+                    File f = new File(tenderDir + File.separator + blobName);
+                    tender.addBlob(blobName);
+                    if (!f.exists()) {
+                        try {
+                            // download save, convert to text
+                            FileUtils.copyURLToFile(new URL(href), f);
+                            String text = Util.blobToText(f.getAbsolutePath());
+                            Util.writeStringToFile(text, f.getAbsolutePath() + ".txt");
+                        } catch (Exception e) {
+                            Util.print_exception("Error trying to extract text from " + f.getAbsolutePath(), e, log);
+                        }
+                    } else
+                        log.info("Skipping blob: " + f.getAbsolutePath() + " because it already exists");
                 }
-                else
-                    log.info ("Skipping file: " + f.getAbsolutePath() + " because it already exists");
             }
 
             // all done for this subpage
@@ -637,27 +648,39 @@ public class BrowserController {
                 continue;
             }
             Tender tender = new Tender();
-            tender.currentStatus = status;
-
-            tender.departmentOrLocationCode = cols.get(1).getText();
             tender.number = cols.get(2).getText();
-            tender.title = cols.get(3).getText();
-            tender.type = cols.get(4).getText();
-            tender.category = cols.get(5).getText();
-            tender.subCategory = cols.get(6).getText();
-            tender.estimatedValue = cols.get(7).getText();
-            tender.NITPublishedDate = cols.get(8).getText();
-            tender.lastDateForBidSubmission = cols.get(9).getText();
-
             String tenderId = tender.number;
             String tenderDir = rootDir + File.separator + tenderId; // + "-" + status;
             tenderDir += File.separator; // trailing sep to indicate its a directory
             File tenderDirFile = new File(tenderDir);
-            if (!tenderDirFile.exists())
-                tenderDirFile.mkdirs();
 
-            log.info ("Downloading subpages...");
-            downloadSubPages (thisRowXpath, tender, tenderDir);
+            // check if this tender needs to be read, or we just use the latest copy in the tender dir
+            boolean readTenderFromPage = true;
+            {
+                if (!EprocFetcher.REFRESH_TENDERS && new File (tenderDir + EprocFetcher.TENDER_FILENAME).exists())
+                    readTenderFromPage = false; // just try to use the cached version
+                try {
+                    tender = (Tender) Util.readObjectFromFile(EprocFetcher.TENDER_FILENAME);
+                } catch (Exception e) {
+                    readTenderFromPage = true;
+                }
+            }
+
+            if (readTenderFromPage) {
+                tender.currentStatus = status;
+                tender.departmentOrLocationCode = cols.get(1).getText();
+                tender.title = cols.get(3).getText();
+                tender.type = cols.get(4).getText();
+                tender.category = cols.get(5).getText();
+                tender.subCategory = cols.get(6).getText();
+                tender.estimatedValue = cols.get(7).getText();
+                tender.NITPublishedDate = cols.get(8).getText();
+                tender.lastDateForBidSubmission = cols.get(9).getText();
+
+                tenderDirFile.mkdirs();
+                log.info("Downloading subpages...");
+                downloadSubPages(thisRowXpath, tender, tenderDir);
+            }
 
             tenders.add (tender);
             tender.save(tenderDir);

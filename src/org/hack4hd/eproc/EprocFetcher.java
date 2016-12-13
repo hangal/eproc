@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -29,6 +30,7 @@ public class EprocFetcher {
     private static final String TENDER_PUBLISHED_FROM_FIELD_NAME = "eprocTenders:tenderCreateDateFrom";
     private static final String TENDER_PUBLISHED_TO_FIELD_NAME = "eprocTenders:tenderCreateDateTo";
     private static final String SEARCH_BUTTON_XPATH = "//input[contains(@id, 'eprocTenders:butSearch')]";
+    public static final String TENDER_FILENAME = "tender-LATEST.ser"; // name for the latest tender file in each directory, serialized
 
     // search results page constants
     public static final String TENDERS_TABLE_XPATH = "//table[@id='eprocTenders:browserTableEprocTenders']";
@@ -37,6 +39,10 @@ public class EprocFetcher {
 
     // subpage constants
     public static final String SUBPAGE_HEADING_CSS = "td.heading";
+
+    // fetch configuration
+    public static final boolean REFRESH_TENDERS = false, FETCH_ALL_BLOBS = false, FETCH_ONLY_TEXT_BLOBS = true;
+    public static final String RUN_TAG = "RUN1"; // new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss").format (new Date());
 
     BrowserController browser;
 
@@ -79,6 +85,7 @@ public class EprocFetcher {
                 break;
             }
             nextPage++;
+            browser.waitFor (5); // throttle
         }
 
         return allTenders;
@@ -116,6 +123,7 @@ public class EprocFetcher {
         // setupDropDownsBRTS();
 
         String[] tenderStatuses = new String[]{"Published", "Closed", "Under Evaluation", "Evaluation Completed", "Awarded", "Evaluation suspended", "No Bids Received", "Recalled", "Retendered", "Finalized"};
+        tenderStatuses = new String[]{"Published", "Closed", "Under Evaluation", "Evaluation Completed", "Awarded"};
         // options: "Published", "Closed", "Under Evaluation", "Evaluation Completed", "Awarded", "Evaluation suspended", "No Bids Received", "Recalled", "Retendered", "Finalized"
         List<Tender> allTenders = new ArrayList<>();
 
@@ -129,13 +137,13 @@ public class EprocFetcher {
                 List<Tender> tendersForThisStatus = getAllTenders(outputDir, tenderStatus);
                 allTenders.addAll (tendersForThisStatus);
 
-                saveTenders (outputDir, tenderStatus + "-tenders-" + Tender.sdf.format(new Date()), tendersForThisStatus);
+                saveTenders (outputDir, tenderStatus + "-tenders-" + RUN_TAG, tendersForThisStatus);
             }
         } catch (Exception e) {
             Util.print_exception("Sorry, download failed! ", e, log);
         }
 
-        saveTenders (outputDir, "all-tenders-" + Tender.sdf.format(new Date()), allTenders);
+        saveTenders (outputDir, "all-tenders-" + RUN_TAG, allTenders);
         log.info (allTenders.size() + " tenders downloaded");
     }
 

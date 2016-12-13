@@ -19,7 +19,6 @@ import java.util.Map;
  */
 public class Tender implements Serializable {
     private static Log log = LogFactory.getLog(Tender.class);
-    public static SimpleDateFormat sdf = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
 
     String currentStatus;
     boolean hasTenderDetails, hasBidEvaluationResults;
@@ -69,8 +68,15 @@ public class Tender implements Serializable {
 
     }
 
-    /** saves tender as .ser and .csv. returns a list of fields as csv */
-    public List<String> save (String dir) throws IOException {
+    /** saves tender as .ser and .csv in the given dir */
+    public void save (String dir) throws IOException {
+        // save in 2 places
+        saveWithTag (dir, "tender-" + EprocFetcher.RUN_TAG);
+        saveWithTag (dir, EprocFetcher.TENDER_FILENAME);
+    }
+
+    /** saves tender as .ser and .csv. as dir/tag.ser and dir/tag.csv */
+    public void saveWithTag (String dir, String tag) throws IOException {
         List<String> colList = Util.getInstanceFields(this);
         List<String> colNamesList = Util.getInstanceFieldNames(this);
 
@@ -79,20 +85,16 @@ public class Tender implements Serializable {
 
         log.info ("Writing out columns for tender " + number);
 
-        String dateString = sdf.format (new java.util.Date());
-        String filePrefix = "tender-" + dateString;
 
         // write out .ser version
-        Util.writeObjectToFile (dir + File.separator + filePrefix + ".ser", this);
+        Util.writeObjectToFile (dir + File.separator + tag + ".ser", this);
 
         // write out the CSV file with these fields
         String NEW_LINE_SEPARATOR = "\n";
         CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
-        Writer fileWriter = new FileWriter(dir + File.separator + filePrefix + ".csv");
+        Writer fileWriter = new FileWriter(dir + File.separator + tag + ".csv");
         CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
         csvFilePrinter.printRecord(colList);
         fileWriter.close();
-
-        return colList;
     }
 }

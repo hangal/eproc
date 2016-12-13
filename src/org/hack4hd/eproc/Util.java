@@ -40,6 +40,14 @@ public class Util {
         return sb.toString();
     }
 
+    public static Serializable readObjectFromFile(String filename) throws IOException, ClassNotFoundException
+    {
+        ObjectInputStream ois = new ObjectInputStream(new FileInputStream(filename));
+        Serializable s = (Serializable) ois.readObject();
+        ois.close();
+        return s;
+    }
+
     public static void writeObjectToFile(String filename, Serializable s) throws IOException
     {
         ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(filename));
@@ -98,5 +106,17 @@ public class Util {
             colNamesList.add(field.getName());
         }
         return colNamesList;
+    }
+
+    public static boolean isTextBlob (String blobName) {
+        if (blobName == null)
+            return false;
+
+        blobName = blobName.toLowerCase();
+
+        return blobName.endsWith (".doc") || blobName.endsWith (".docx")
+                || blobName.endsWith (".ppt") || blobName.endsWith (".pptx")
+                || blobName.endsWith (".xls") || blobName.endsWith (".xlsx")
+                || blobName.endsWith (".pdf");
     }
 }
