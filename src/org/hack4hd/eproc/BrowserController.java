@@ -2,8 +2,6 @@ package org.hack4hd.eproc;
 
 import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Multiset;
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -32,13 +30,13 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-public class StepDefs {
+public class BrowserController {
     private WebDriver driver;
     public static String BASE_DIR;
     private static String BROWSER_NAME;
 
     private static String DEFAULT_BASE_DIR = System.getProperty("user.home") + File.separator + "eproc-test";
-    private static Log log = LogFactory.getLog(StepDefs.class);
+    private static Log log = LogFactory.getLog(BrowserController.class);
     static Properties VARS;
     private static String EPROC_TEST_PROPS_FILE = System.getProperty("user.home") + File.separator + "eproc.test.properties";
 
@@ -65,7 +63,7 @@ public class StepDefs {
 
     public boolean runningOnMac() { return System.getProperty("os.name").startsWith("Mac"); }
 
-    public StepDefs() {
+    public BrowserController() {
 		VARS = new Properties();
 
 		File f = new File(EPROC_TEST_PROPS_FILE);
@@ -462,7 +460,7 @@ public class StepDefs {
 		WebElement element = driver.findElement(By.xpath (xpathSelector));
 		((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true); arguments[0].style.border = '2px solid red';", element);
 		Select select = new Select(element);
-		waitFor (2);
+		waitFor (1);
 		select.selectByVisibleText(value);
         waitFor (1);
 	}
@@ -492,36 +490,50 @@ public class StepDefs {
         return null;
     }
 
-	/** given top level cell, goes into each subpage linked to from that cell and fetches the subpage, as well as any download links on it */
-	public void downloadSubPages (Tender tender, WebElement topLevelCell, String tenderDir) throws IOException {
-        List<WebElement> subPages = topLevelCell.findElements(By.tagName("a"));
-
-        int nLinks = 0;
-        Multiset<String> subPageLowerCaseTitlesSeen = LinkedHashMultiset.create(); // this will track all the names of subpages seen
+	/** given the row xpath, goes into each subpage linked to from in the last column of that row and fetches the subpage, as well as any download links on it */
+	public void downloadSubPages (String rowXpath, Tender tender, String tenderDir) throws IOException {
         // usually, the page titles are: View Notice Inviting Tender details, Download Tender Documents, View Addendum for this tender, View Corrigendum for this tender, View Selected Supplier/s for this Tender
         // I believe multiple sub pages with the same title are possible, so we'll be extra careful, using subPageLowerCaseTitlesSeen
         // note: The "/" in View Selected Supplier/s for this Tender will be replaced by "_"
+
+        // each sub page
+        String subPagesXpath = rowXpath + "/td[" + EprocFetcher.N_COLS_IN_TENDER_ROW + "]/a"; // cell 11 is the last cell in the row, and it contains all the links to the sub pages
+        int nSubPages = 0;
+        try { nSubPages = driver.findElements(By.xpath(subPagesXpath)).size(); }
+        catch (Exception e) { }
 
         FileNameManager subPageNameManager = new FileNameManager();
         FileNameManager blobNameManager = new FileNameManager();
 
         nextSubPage:
-        for (WebElement subPage: subPages) {
-            String url = subPage.getAttribute("href");
+        for (int i = 0; i < nSubPages; i++) {
+
+            // very important: we need to refresh the page!
+            // otherwise, due to a probable bug in eproc, the bid evaluation results page intermittently omits the data we're interested in!
+            // see docs/screenshots/bid-eval-results-bug.png
+            // refreshing the page before clicking on each subpage seems to solve the problem
+
+            driver.navigate().refresh();
+
+            String xpath = subPagesXpath + "[" + (i+1) + "]"; // look for the i+1'th sup page (xpath numbering starts from 1)
+            WebElement subPageLink = driver.findElement(By.xpath(xpath));
+            // use the title attribute of the img element inside the subpage link as the subpage title.
+            // however, massage it to avoid conflicts, get rid of "/" embedded in it, etc.
+            String subPageTitle = ((RemoteWebElement) subPageLink).findElementByTagName("img").getAttribute("title");
+            subPageTitle = subPageNameManager.registerAndDisambiguate(subPageTitle);
+            tender.addSubPage(subPageTitle);
 
             // open in a new tab. but get info on that tab and then close it.
             // max 2 tabs will be open at a time
+            // String url = subPageLink.getAttribute("href");
+            // ((JavascriptExecutor) driver).executeScript("window.open('" + url + "','_blank');");
+            // set the target to _blank to make it open in a new page and click on it
+            ((JavascriptExecutor) driver).executeScript("arguments[0].setAttribute(arguments[1], arguments[2])", subPageLink, "target", "_blank");
+            subPageLink.click();
 
-            ((JavascriptExecutor) driver).executeScript("window.open('" + url + "','_blank');");
+            // now subpage should open in a new tab; switch to it
+
             ArrayList<String> tabs = new ArrayList<>(driver.getWindowHandles());
-
-
-            // use the title attribute of the img element as the subpage title.
-            // however, massage it to avoid conflicts, get rid of "/" embedded in it, etc.
-            String subPageTitle = ((RemoteWebElement) subPage).findElementByTagName("img").getAttribute("title");
-            subPageTitle = subPageNameManager.registerAndDisambiguate(subPageTitle);
-
-            tender.addSubPage(subPageTitle);
 
             // save the page to a file
             {
@@ -536,9 +548,10 @@ public class StepDefs {
 
             // on these subpages, there is a td.pageHeading that contains the title of the page
             String subPageHeading = null;
-            try { subPageHeading = driver.findElement(By.cssSelector("td.pageHeading")).getText(); }
+            try { subPageHeading = driver.findElement(By.cssSelector(EprocFetcher.SUBPAGE_HEADING_CSS)).getText(); }
             catch (Exception e) { }
 
+            // if its the tender details page, pick up some of the structured fields in it. See screenshots/tender-details.png for example
             if ("Tender details".equalsIgnoreCase (subPageHeading)) {
                 tender.hasTenderDetails = true;
                 tender.financialBidType = getValueOfNextField ("Type of Quotation");
@@ -549,18 +562,19 @@ public class StepDefs {
                 tender.denominationType = getValueOfNextField ("Denomination Type");
             }
 
+            // if its the bid eval results page, pick up some of the structured fields in it. See screenshots/bid-eval-results.png for example
             if ("Bid Evaluation Results".equals (subPageHeading)) {
 
                 tender.hasBidEvaluationResults = true;
                 tender.financialBidType = getValueOfNextField ("Financial Bid Type");
                 tender.selectedSupplier = getValueOfNextField ("Selected Supplier");
                 tender.selectedCompanyName = getValueOfNextField ("Company Name");
-                tender.bidAmountInFigures = getValueOfNextField ("Bid Amount ( Rs. In figures"); // darn spelling and caps!!!!
+                tender.bidAmountInFigures = getValueOfNextField ("Bid Amount ( Rs. In figures"); // darn spelling and caps in eproc -- we better be exact!!!!
                 tender.bidAmountInWords = getValueOfNextField ("Bid Amount ( Rs. In words");
             }
 
             boolean downloadDocsOnSubPage = subPageTitle.contains("Download Tender Documents");
-            log.info("Subpage #" + (++nLinks) + ":" + "Download subpage = " + downloadDocsOnSubPage + " " + url);
+            log.info("Subpage #" + (i+1) + ":" + "Download subpage = " + downloadDocsOnSubPage);
 
             // if download links on subpage, also fetch those, if they don't already exist
 
@@ -600,24 +614,31 @@ public class StepDefs {
         }
     }
 
-    /** downloads all tenders on page */
-	public List<Tender> getTendersOnPage(String rootDir, String status) throws InterruptedException, IOException {
+    /** reads all tenders on the given page */
+	public List<Tender> getTendersOnCurrentPage(String rootDir, String status) throws InterruptedException, IOException {
         if (Util.nullOrEmpty(rootDir))
             rootDir = ".";
         List<Tender> tenders = new ArrayList<>();
 
-        List<WebElement> rows = driver.findElements(By.xpath("//table[@id='eprocTenders:browserTableEprocTenders']/tbody/tr"));
-        int nRow = 0;
-        Tender tender = new Tender();
-        tender.currentStatus = status;
+        String tableXpath = EprocFetcher.TENDERS_TABLE_XPATH;
+        int nRows = driver.findElements(By.xpath(tableXpath + "/tbody/tr")).size();
 
-        for (WebElement row: rows) {
+        for (int i = 0; i < nRows; i++) {
+
+            // read the (i+1)'th row (remember xpath numbering starts from 1)
+            // we do a fresh findElement each time. If we did a findElement of all the rows outside this loop, we often see problems due to stale elements
+            String thisRowXpath = tableXpath + "/tbody/tr[" + (i+1) + "]";
+            WebElement row = driver.findElement(By.xpath(thisRowXpath));
+
             List<WebElement> cols = row.findElements(By.tagName("td"));
             // normally cols will be of size 11
             if (cols.size() < 11) {
                 log.warn ("unexpected #cols: " + cols.size() + row.getText());
                 continue;
             }
+            Tender tender = new Tender();
+            tender.currentStatus = status;
+
             tender.departmentOrLocationCode = cols.get(1).getText();
             tender.number = cols.get(2).getText();
             tender.title = cols.get(3).getText();
@@ -636,13 +657,12 @@ public class StepDefs {
                 tenderDirFile.mkdirs();
 
             log.info ("Downloading subpages...");
-            WebElement lastCol = cols.get (cols.size()-1);
-            downloadSubPages (tender, lastCol, tenderDir);
+            downloadSubPages (thisRowXpath, tender, tenderDir);
 
             tenders.add (tender);
             tender.save(tenderDir);
 
-            log.info ("Completed tender in row # " + (++nRow) + "/" + rows.size() + " TenderID: " + tenderId + "\n\n---------\n\n");
+            log.info ("Completed tender in row # " + (i+1) + "/" + nRows + " TenderID: " + tenderId + "\n\n---------\n\n");
         }
         return tenders;
     }

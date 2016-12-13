@@ -44,13 +44,13 @@ public class Tender implements Serializable {
     public void addBlob(String f) {
         blobFiles.add (f);
         numBlobs = blobFiles.size();
-        allBlobNames = String.join ("|", blobFiles);
+        allBlobNames = String.join (",\n", blobFiles); // deliberately use both , and \n as separator
     }
 
     public void addSubPage(String f) {
         subPages.add (f);
         numSubPages = subPages.size();
-        allSubPageNames = String.join ("|", subPages);
+        allSubPageNames = String.join (",\n", subPages);  // deliberately use both , and \n as separator
     }
 
     public int hashCode () {
@@ -74,7 +74,7 @@ public class Tender implements Serializable {
         List<String> colList = Util.getInstanceFields(this);
         List<String> colNamesList = Util.getInstanceFieldNames(this);
 
-        colList.add (String.join ("|", colNamesList)); // just for reference, keep the col names list
+        colList.add (String.join (" | ", colNamesList)); // just for reference, keep the col names list
         colNamesList.add ("Column names");
 
         log.info ("Writing out columns for tender " + number);
@@ -90,7 +90,7 @@ public class Tender implements Serializable {
         CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
         Writer fileWriter = new FileWriter(dir + File.separator + filePrefix + ".csv");
         CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
-        csvFilePrinter.print(colList);
+        csvFilePrinter.printRecord(colList);
         fileWriter.close();
 
         return colList;
