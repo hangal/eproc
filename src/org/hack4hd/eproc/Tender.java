@@ -6,9 +6,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import java.io.*;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,6 +30,7 @@ public class Tender implements Serializable {
 
     List<String> subPages = new ArrayList<>();
     List<String> blobFiles = new ArrayList<>();
+    List<String> blobLinks = new ArrayList<>();
 
     Map<String, String> otherFields = new LinkedHashMap<>(); // for future use
 
@@ -40,10 +38,11 @@ public class Tender implements Serializable {
         return number;
     }
 
-    public void addBlob(String f) {
+    public void addBlob(String f, String link) {
         blobFiles.add (f);
         numBlobs = blobFiles.size();
         allBlobNames = String.join (",\n", blobFiles); // deliberately use both , and \n as separator
+        blobLinks.add (link);
     }
 
     public void addSubPage(String f) {
@@ -71,28 +70,28 @@ public class Tender implements Serializable {
     /** saves tender as .ser and .csv in the given dir */
     public void save (String dir) throws IOException {
         // save in 2 places
-        saveWithTag (dir, "tender-" + EprocFetcher.RUN_TAG);
-        saveWithTag (dir, EprocFetcher.TENDER_FILENAME);
+        saveWithTag (dir, EprocFetcher.RUN_TAG);
+        saveWithTag (dir, EprocFetcher.LATEST_TENDER_TAG);
     }
 
-    /** saves tender as .ser and .csv. as dir/tag.ser and dir/tag.csv */
+    /** saves tender as .ser and .csv. as dir/tender-tag.ser and dir/tender-tag.csv */
     public void saveWithTag (String dir, String tag) throws IOException {
         List<String> colList = Util.getInstanceFields(this);
         List<String> colNamesList = Util.getInstanceFieldNames(this);
 
-        colList.add (String.join (" | ", colNamesList)); // just for reference, keep the col names list
+        // just for reference, keep the col names list. not strictly needed
         colNamesList.add ("Column names");
+        colList.add (String.join (" | ", colNamesList));
 
         log.info ("Writing out columns for tender " + number);
 
-
         // write out .ser version
-        Util.writeObjectToFile (dir + File.separator + tag + ".ser", this);
+        Util.writeObjectToFile (dir + File.separator + EprocFetcher.TENDER_FILENAME_PREFIX + tag + ".ser", this);
 
         // write out the CSV file with these fields
         String NEW_LINE_SEPARATOR = "\n";
         CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
-        Writer fileWriter = new FileWriter(dir + File.separator + tag + ".csv");
+        Writer fileWriter = new FileWriter(dir + File.separator + EprocFetcher.TENDER_FILENAME_PREFIX + tag + ".csv");
         CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
         csvFilePrinter.printRecord(colList);
         fileWriter.close();

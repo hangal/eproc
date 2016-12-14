@@ -10,9 +10,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -20,7 +18,6 @@ import java.util.List;
  */
 public class EprocFetcher {
     private static Log log = LogFactory.getLog(Tender.class);
-
 
     // search form constants
     private static final String EPROC_START_PAGE = "https://eproc.karnataka.gov.in/eprocurement/common/eproc_tenders_list.seam";
@@ -30,7 +27,8 @@ public class EprocFetcher {
     private static final String TENDER_PUBLISHED_FROM_FIELD_NAME = "eprocTenders:tenderCreateDateFrom";
     private static final String TENDER_PUBLISHED_TO_FIELD_NAME = "eprocTenders:tenderCreateDateTo";
     private static final String SEARCH_BUTTON_XPATH = "//input[contains(@id, 'eprocTenders:butSearch')]";
-    public static final String TENDER_FILENAME = "tender-LATEST.ser"; // name for the latest tender file in each directory, serialized
+    public static final String LATEST_TENDER_TAG = "LATEST"; // name for the latest tender file in each directory, serialized
+    public static final String TENDER_FILENAME_PREFIX = "tender-";
 
     // search results page constants
     public static final String TENDERS_TABLE_XPATH = "//table[@id='eprocTenders:browserTableEprocTenders']";
@@ -38,11 +36,14 @@ public class EprocFetcher {
     public static final String PAGINATION_CONTROL_XPATH = "//table[@class = 'scroller']";
 
     // subpage constants
-    public static final String SUBPAGE_HEADING_CSS = "td.heading";
+    public static final String SUBPAGE_HEADING_CSS = "td.pageHeading";
 
     // fetch configuration
-    public static final boolean REFRESH_TENDERS = false, FETCH_ALL_BLOBS = false, FETCH_ONLY_TEXT_BLOBS = true;
-    public static final String RUN_TAG = "RUN1"; // new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss").format (new Date());
+    public static final boolean FETCH_TENDERS_ONLY_IF_STATUS_CHANGED = true, // if true, will fetch tender only if status has changed w.r.t. tender-LATEST
+                                FETCH_ALL_BLOBS = false, // if true, will fetch all blobs
+                                FETCH_ONLY_TEXT_BLOBS = true; // if true, only doc blobs will be fetched and converted to text
+
+    public static final String RUN_TAG = "V1"; // new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss").format (new Date());
 
     BrowserController browser;
 
@@ -75,6 +76,8 @@ public class EprocFetcher {
             List<Tender> tendersOnPage = browser.getTendersOnCurrentPage(dir, tenderStatus);
             allTenders.addAll(tendersOnPage);
 
+            log.info ("\nStatus " + tenderStatus + ": Completed " + (nextPage-1) + " pages, " + allTenders.size() + " tenders\n");
+
             // try and click through to the next page
             // PAGINATION_CONTROL_XPATH is the navbar at the bottom... look for links inside where the link text is simply the #
             String xpath = PAGINATION_CONTROL_XPATH + "//a[text() = '" + nextPage + "']";
@@ -91,22 +94,23 @@ public class EprocFetcher {
         return allTenders;
     }
 
-    void saveTenders (String outputDir, String prefix, List<Tender> tenders) throws IOException {
-        Util.writeObjectToFile(outputDir + File.separator + prefix + ".ser", (java.io.Serializable) tenders);
+    void saveTenders (String outputDir, String statusPrefix, List<Tender> tenders) throws IOException {
+        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + RUN_TAG + ".ser", (java.io.Serializable) tenders);
+        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + LATEST_TENDER_TAG + ".ser", (java.io.Serializable) tenders);
 
         // write out the CSV file for all tenders with these fields
         if (tenders.size() > 0) {
             String NEW_LINE_SEPARATOR = "\n";
             CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
-            Writer fileWriter = new FileWriter(outputDir + File.separator + prefix + ".csv");
+            Writer fileWriter = new FileWriter(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + RUN_TAG + ".csv");
 
             CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
             List<String> colNamesList = Util.getInstanceFieldNames(tenders.get(0));
-            csvFilePrinter.printRecord(colNamesList);
+            csvFilePrinter.printRecord (colNamesList);
 
             for (Tender tender : tenders) {
                 List<String> colList = Util.getInstanceFields(tender);
-                csvFilePrinter.printRecord(colList);
+                csvFilePrinter.printRecord (colList);
             }
 
             fileWriter.close();
@@ -117,7 +121,7 @@ public class EprocFetcher {
         browser = new BrowserController();
         browser.openBrowser();
         browser.openURL (EPROC_START_PAGE);
-        browser.waitFor(2);
+        browser.waitFor(1);
 
         setupDropDownsHDMC();
         // setupDropDownsBRTS();
@@ -136,14 +140,15 @@ public class EprocFetcher {
                 browser.clickOnXpath (SEARCH_BUTTON_XPATH);
                 List<Tender> tendersForThisStatus = getAllTenders(outputDir, tenderStatus);
                 allTenders.addAll (tendersForThisStatus);
+                log.info ("Saving " + tendersForThisStatus.size() + " tenders for status " + tenderStatus + "\n----\n\n");
 
-                saveTenders (outputDir, tenderStatus + "-tenders-" + RUN_TAG, tendersForThisStatus);
+                saveTenders (outputDir, tenderStatus + "-" + TENDER_FILENAME_PREFIX + RUN_TAG, tendersForThisStatus);
             }
         } catch (Exception e) {
             Util.print_exception("Sorry, download failed! ", e, log);
         }
 
-        saveTenders (outputDir, "all-tenders-" + RUN_TAG, allTenders);
+        saveTenders (outputDir, "all-", allTenders);
         log.info (allTenders.size() + " tenders downloaded");
     }
 

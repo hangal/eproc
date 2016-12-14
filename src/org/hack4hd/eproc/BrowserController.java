@@ -579,8 +579,7 @@ public class BrowserController {
                 tender.bidAmountInWords = getValueOfNextField ("Bid Amount ( Rs. In words");
             }
 
-            boolean downloadDocsOnSubPage = subPageTitle.contains("Download Tender Documents");
-            log.info("Subpage #" + (i+1) + ":" + "Download subpage = " + downloadDocsOnSubPage);
+            log.info("Tender " + tender.number + ", Subpage #" + (i+1) + ":" + subPageHeading);
 
             // if download links on subpage, also fetch those, if they don't already exist
 
@@ -603,7 +602,7 @@ public class BrowserController {
                     blobName = blobNameManager.registerAndDisambiguate(blobName);
                     log.info("Download link for file: " + blobName + " href: " + href);
                     File f = new File(tenderDir + File.separator + blobName);
-                    tender.addBlob(blobName);
+                    tender.addBlob(blobName, href);
                     if (!f.exists()) {
                         try {
                             // download save, convert to text
@@ -632,7 +631,7 @@ public class BrowserController {
         List<Tender> tenders = new ArrayList<>();
 
         String tableXpath = EprocFetcher.TENDERS_TABLE_XPATH;
-        int nRows = driver.findElements(By.xpath(tableXpath + "/tbody/tr")).size();
+        int nRows = driver.findElements(By.xpath(tableXpath + "/tbody/tr")).size(); // each row in the body is a tender (need tbody to ensure we exclude the header)
 
         for (int i = 0; i < nRows; i++) {
 
@@ -643,10 +642,11 @@ public class BrowserController {
 
             List<WebElement> cols = row.findElements(By.tagName("td"));
             // normally cols will be of size 11
-            if (cols.size() < 11) {
+            if (cols.size() < EprocFetcher.N_COLS_IN_TENDER_ROW) {
                 log.warn ("unexpected #cols: " + cols.size() + row.getText());
                 continue;
             }
+
             Tender tender = new Tender();
             tender.number = cols.get(2).getText();
             String tenderId = tender.number;
@@ -654,38 +654,45 @@ public class BrowserController {
             tenderDir += File.separator; // trailing sep to indicate its a directory
             File tenderDirFile = new File(tenderDir);
 
-            // check if this tender needs to be read, or we just use the latest copy in the tender dir
-            boolean readTenderFromPage = true;
-            {
-                if (!EprocFetcher.REFRESH_TENDERS && new File (tenderDir + EprocFetcher.TENDER_FILENAME).exists())
-                    readTenderFromPage = false; // just try to use the cached version
+            // check if this tender dir already exists, or we just use the latest copy in the tender dir if status is unchanged
+            boolean readTenderSubPages = true;
+            if (EprocFetcher.FETCH_TENDERS_ONLY_IF_STATUS_CHANGED) {
                 try {
-                    tender = (Tender) Util.readObjectFromFile(EprocFetcher.TENDER_FILENAME);
+                    // read existing object
+                    String f = tenderDir + EprocFetcher.TENDER_FILENAME_PREFIX + EprocFetcher.LATEST_TENDER_TAG + ".ser";
+                    if (new File(f).exists()) {
+                        tender = (Tender) Util.readObjectFromFile(f);
+                        readTenderSubPages = (tender.currentStatus != status); // if status differs from current status, reread subpages
+                    }
                 } catch (Exception e) {
-                    readTenderFromPage = true;
+                    readTenderSubPages = true;
                 }
             }
 
-            if (readTenderFromPage) {
-                tender.currentStatus = status;
-                tender.departmentOrLocationCode = cols.get(1).getText();
-                tender.title = cols.get(3).getText();
-                tender.type = cols.get(4).getText();
-                tender.category = cols.get(5).getText();
-                tender.subCategory = cols.get(6).getText();
-                tender.estimatedValue = cols.get(7).getText();
-                tender.NITPublishedDate = cols.get(8).getText();
-                tender.lastDateForBidSubmission = cols.get(9).getText();
+            // always update these fields, even if we are not reading sub pages
+            tender.currentStatus = status;
+            tender.departmentOrLocationCode = cols.get(1).getText();
+            tender.title = cols.get(3).getText();
+            tender.type = cols.get(4).getText();
+            tender.category = cols.get(5).getText();
+            tender.subCategory = cols.get(6).getText();
+            tender.estimatedValue = cols.get(7).getText();
+            tender.NITPublishedDate = cols.get(8).getText();
+            tender.lastDateForBidSubmission = cols.get(9).getText();
 
-                tenderDirFile.mkdirs();
-                log.info("Downloading subpages...");
+            tenderDirFile.mkdirs();
+
+            log.info("Downloading subpages...");
+
+            if (readTenderSubPages) {
                 downloadSubPages(thisRowXpath, tender, tenderDir);
             }
 
+            // always save back tender file, even if we are not reading sub pages
             tenders.add (tender);
-            tender.save(tenderDir);
+            tender.save (tenderDir);
 
-            log.info ("Completed tender in row # " + (i+1) + "/" + nRows + " TenderID: " + tenderId + "\n\n---------\n\n");
+            log.info ("Completed tender in row # " + (i+1) + "/" + nRows + " TenderID: " + tenderId + " Status: " + tender.currentStatus + "\n\n---------\n\n");
         }
         return tenders;
     }
