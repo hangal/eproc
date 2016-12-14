@@ -662,7 +662,8 @@ public class BrowserController {
                     String f = tenderDir + EprocFetcher.TENDER_FILENAME_PREFIX + EprocFetcher.LATEST_TENDER_TAG + ".ser";
                     if (new File(f).exists()) {
                         tender = (Tender) Util.readObjectFromFile(f);
-                        readTenderSubPages = (tender.currentStatus != status); // if status differs from current status, reread subpages
+                        readTenderSubPages = (!status.equals(tender.currentStatus)); // if status differs from current status, reread subpages
+                        log.info ("read cached tender for " + tender.number + ", skipping sub-pages");
                     }
                 } catch (Exception e) {
                     readTenderSubPages = true;
@@ -682,9 +683,9 @@ public class BrowserController {
 
             tenderDirFile.mkdirs();
 
-            log.info("Downloading subpages...");
 
             if (readTenderSubPages) {
+                log.info("Downloading subpages for tender " + tender.number);
                 downloadSubPages(thisRowXpath, tender, tenderDir);
             }
 

@@ -95,14 +95,14 @@ public class EprocFetcher {
     }
 
     void saveTenders (String outputDir, String statusPrefix, List<Tender> tenders) throws IOException {
-        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + RUN_TAG + ".ser", (java.io.Serializable) tenders);
-        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + LATEST_TENDER_TAG + ".ser", (java.io.Serializable) tenders);
+        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + RUN_TAG + ".ser", (java.io.Serializable) tenders);
+        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + LATEST_TENDER_TAG + ".ser", (java.io.Serializable) tenders);
 
         // write out the CSV file for all tenders with these fields
         if (tenders.size() > 0) {
             String NEW_LINE_SEPARATOR = "\n";
             CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
-            Writer fileWriter = new FileWriter(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + RUN_TAG + ".csv");
+            Writer fileWriter = new FileWriter(outputDir + File.separator + statusPrefix + "-" + TENDER_FILENAME_PREFIX + RUN_TAG + ".csv");
 
             CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
             List<String> colNamesList = Util.getInstanceFieldNames(tenders.get(0));
@@ -127,7 +127,7 @@ public class EprocFetcher {
         // setupDropDownsBRTS();
 
         String[] tenderStatuses = new String[]{"Published", "Closed", "Under Evaluation", "Evaluation Completed", "Awarded", "Evaluation suspended", "No Bids Received", "Recalled", "Retendered", "Finalized"};
-        tenderStatuses = new String[]{"Published", "Closed", "Under Evaluation", "Evaluation Completed", "Awarded"};
+        tenderStatuses = new String[]{"Evaluation Completed", "Awarded"};
         // options: "Published", "Closed", "Under Evaluation", "Evaluation Completed", "Awarded", "Evaluation suspended", "No Bids Received", "Recalled", "Retendered", "Finalized"
         List<Tender> allTenders = new ArrayList<>();
 
@@ -142,7 +142,7 @@ public class EprocFetcher {
                 allTenders.addAll (tendersForThisStatus);
                 log.info ("Saving " + tendersForThisStatus.size() + " tenders for status " + tenderStatus + "\n----\n\n");
 
-                saveTenders (outputDir, tenderStatus + "-" + TENDER_FILENAME_PREFIX + RUN_TAG, tendersForThisStatus);
+                saveTenders (outputDir, tenderStatus, tendersForThisStatus);
             }
         } catch (Exception e) {
             Util.print_exception("Sorry, download failed! ", e, log);
