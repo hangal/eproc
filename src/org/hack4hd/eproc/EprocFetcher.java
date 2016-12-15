@@ -27,8 +27,6 @@ public class EprocFetcher {
     private static final String TENDER_PUBLISHED_FROM_FIELD_NAME = "eprocTenders:tenderCreateDateFrom";
     private static final String TENDER_PUBLISHED_TO_FIELD_NAME = "eprocTenders:tenderCreateDateTo";
     private static final String SEARCH_BUTTON_XPATH = "//input[contains(@id, 'eprocTenders:butSearch')]";
-    public static final String LATEST_TENDER_TAG = "LATEST"; // name for the latest tender file in each directory, serialized
-    public static final String TENDER_FILENAME_PREFIX = "tender-";
 
     // search results page constants
     public static final String TENDERS_TABLE_XPATH = "//table[@id='eprocTenders:browserTableEprocTenders']";
@@ -94,28 +92,6 @@ public class EprocFetcher {
         return allTenders;
     }
 
-    void saveTenders (String outputDir, String statusPrefix, List<Tender> tenders) throws IOException {
-        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + RUN_TAG + ".ser", (java.io.Serializable) tenders);
-        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + LATEST_TENDER_TAG + ".ser", (java.io.Serializable) tenders);
-
-        // write out the CSV file for all tenders with these fields
-        if (tenders.size() > 0) {
-            String NEW_LINE_SEPARATOR = "\n";
-            CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
-            Writer fileWriter = new FileWriter(outputDir + File.separator + statusPrefix + "-" + TENDER_FILENAME_PREFIX + RUN_TAG + ".csv");
-
-            CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
-            List<String> colNamesList = Util.getInstanceFieldNames(tenders.get(0));
-            csvFilePrinter.printRecord (colNamesList);
-
-            for (Tender tender : tenders) {
-                List<String> colList = Util.getInstanceFields(tender);
-                csvFilePrinter.printRecord (colList);
-            }
-
-            fileWriter.close();
-        }
-    }
 
     public void doIt() throws InterruptedException, IOException {
         browser = new BrowserController();
@@ -142,13 +118,13 @@ public class EprocFetcher {
                 allTenders.addAll (tendersForThisStatus);
                 log.info ("Saving " + tendersForThisStatus.size() + " tenders for status " + tenderStatus + "\n----\n\n");
 
-                saveTenders (outputDir, tenderStatus, tendersForThisStatus);
+                Tender.saveTenders (outputDir, tenderStatus, tendersForThisStatus);
             }
         } catch (Exception e) {
             Util.print_exception("Sorry, download failed! ", e, log);
         }
 
-        saveTenders (outputDir, "all-", allTenders);
+        Tender.saveTenders (outputDir, "all-", allTenders);
         log.info (allTenders.size() + " tenders downloaded");
     }
 

@@ -659,7 +659,7 @@ public class BrowserController {
             if (EprocFetcher.FETCH_TENDERS_ONLY_IF_STATUS_CHANGED) {
                 try {
                     // read existing object
-                    String f = tenderDir + EprocFetcher.TENDER_FILENAME_PREFIX + EprocFetcher.LATEST_TENDER_TAG + ".ser";
+                    String f = tenderDir + Tender.TENDER_FILENAME_PREFIX + Tender.LATEST_TAG + ".ser";
                     if (new File(f).exists()) {
                         tender = (Tender) Util.readObjectFromFile(f);
                         readTenderSubPages = (!status.equals(tender.currentStatus)); // if status differs from current status, reread subpages

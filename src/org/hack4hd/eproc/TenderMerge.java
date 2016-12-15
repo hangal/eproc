@@ -1,7 +1,6 @@
 package org.hack4hd.eproc;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -10,9 +9,9 @@ import java.util.List;
  */
 public class TenderMerge {
     public static void main (String args[]) throws IOException, ClassNotFoundException {
-        List<Tender> tender1 = (List<Tender>) Util.readObjectFromFile(args[0]);
-        List<Tender> tender2 = (List<Tender>) Util.readObjectFromFile(args[1]);
-        tender1.addAll (tender2);
-        Util.writeObjectToFile(args[3], (Serializable) tender1);
+        List<Tender> tenders1 = (List<Tender>) Util.readObjectFromFile(args[0]);
+        List<Tender> tenders2 = (List<Tender>) Util.readObjectFromFile(args[1]);
+        tenders1.addAll (tenders2);
+        Tender.saveTenders (".", args[3], tenders1);
     }
 }

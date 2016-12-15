@@ -11,11 +11,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Created by hangal on 12/12/16.
- */
 public class Tender implements Serializable {
     private static Log log = LogFactory.getLog(Tender.class);
+    public static final String TENDER_FILENAME_PREFIX = "tender-";
+    public static final String LATEST_TAG = "LATEST"; // name for the latest tender file in each directory, serialized
 
     String currentStatus;
     boolean hasTenderDetails, hasBidEvaluationResults;
@@ -68,10 +67,10 @@ public class Tender implements Serializable {
     }
 
     /** saves tender as .ser and .csv in the given dir */
-    public void save (String dir) throws IOException {
+    public void save (String baseDir) throws IOException {
         // save in 2 places
-        saveWithTag (dir, EprocFetcher.RUN_TAG);
-        saveWithTag (dir, EprocFetcher.LATEST_TENDER_TAG);
+        saveWithTag (baseDir, EprocFetcher.RUN_TAG);
+        saveWithTag (baseDir, LATEST_TAG);
     }
 
     /** saves tender as .ser and .csv. as dir/tender-tag.ser and dir/tender-tag.csv */
@@ -86,14 +85,41 @@ public class Tender implements Serializable {
         log.info ("Writing out columns for tender " + number);
 
         // write out .ser version
-        Util.writeObjectToFile (dir + File.separator + EprocFetcher.TENDER_FILENAME_PREFIX + tag + ".ser", this);
+        Util.writeObjectToFile (dir + File.separator + TENDER_FILENAME_PREFIX + tag + ".ser", this);
 
         // write out the CSV file with these fields
         String NEW_LINE_SEPARATOR = "\n";
         CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
-        Writer fileWriter = new FileWriter(dir + File.separator + EprocFetcher.TENDER_FILENAME_PREFIX + tag + ".csv");
+        Writer fileWriter = new FileWriter(dir + File.separator + TENDER_FILENAME_PREFIX + tag + ".csv");
         CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
         csvFilePrinter.printRecord(colList);
         fileWriter.close();
+    }
+
+    /** prefix = dir/tag, only .csv is appended to it */
+    static void writeTendersToCSV (String prefix, List<Tender> tenders) throws IOException {
+        // write out the CSV file for all tenders with these fields
+        if (tenders.size() > 0) {
+            String NEW_LINE_SEPARATOR = "\n";
+            CSVFormat csvFileFormat = CSVFormat.DEFAULT.withRecordSeparator(NEW_LINE_SEPARATOR);
+            Writer fileWriter = new FileWriter(prefix + ".csv");
+
+            CSVPrinter csvFilePrinter = new CSVPrinter(fileWriter, csvFileFormat);
+            List<String> colNamesList = Util.getInstanceFieldNames(tenders.get(0));
+            csvFilePrinter.printRecord (colNamesList);
+
+            for (Tender tender : tenders) {
+                List<String> colList = Util.getInstanceFields(tender);
+                csvFilePrinter.printRecord (colList);
+            }
+            fileWriter.close();
+        }
+    }
+
+    static void saveTenders (String outputDir, String statusPrefix, List<Tender> tenders) throws IOException {
+        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + EprocFetcher.RUN_TAG + ".ser", (java.io.Serializable) tenders);
+        Util.writeObjectToFile(outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + LATEST_TAG + ".ser", (java.io.Serializable) tenders);
+        writeTendersToCSV (outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + EprocFetcher.RUN_TAG, tenders);
+        writeTendersToCSV (outputDir + File.separator + statusPrefix + TENDER_FILENAME_PREFIX + "-" + LATEST_TAG, tenders);
     }
 }
